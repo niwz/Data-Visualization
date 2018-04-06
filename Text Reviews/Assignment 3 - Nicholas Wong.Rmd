@@ -1,0 +1,390 @@
+---
+title: "Assignment 3 - Nicholas Wong"
+author: "Nicholas Wong"
+date: "April 2, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(knitr)
+opts_chunk$set(fig.path="images/",
+               cache.path="cache/",
+               cache=FALSE,
+               echo=TRUE,
+               message=FALSE,
+               warning=FALSE)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+options(scipen=999)
+stopifnot(require(dplyr))
+stopifnot(require(ggplot2))
+stopifnot(require(ggthemes))
+stopifnot(require(tm))
+stopifnot(require(qdap))
+stopifnot(require(SnowballC))
+stopifnot(require(tidytext))
+stopifnot(require(wordcloud))
+stopifnot(require(syuzhet))
+stopifnot(require(plotrix))
+set.seed(48)
+```
+
+# Identifying Successful Projects
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+# stopifnot(require(readr))
+# kickstarter <- read_csv("kickstarter_projects.csv")
+```
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+# df <- kickstarter %>%
+#   filter(!state == 'live') %>%
+#   select(c('state', 'pledged', 'backers_count', 'goal', 'top_category')) %>%
+#   mutate(ratio = pledged / goal)
+# df <- slice(df, sample(1:nrow(df), 25000, replace = FALSE))
+# df$state = ifelse(df$state == 'successful', 'successful', 'not successful')
+# save(df, file = 'df.RData')
+load('df.RData')
+```
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+
+p1 <- ggplot(df, aes(x = top_category, y = pledged)) +
+  geom_jitter(aes(color = state)) +
+  theme_tufte() + xlab('') + ylab('Pledged Amount') +
+  ggtitle('Amount Pledged by Category') +
+  theme(legend.position="none", axis.text.x = element_text(angle = 60, hjust = 1), axis.ticks.x = element_blank())
+
+p2 <- ggplot(df, aes(x = top_category, y = backers_count)) +
+  geom_jitter(aes(color = state)) +
+  theme_tufte() + xlab('') + ylab('No. of Backers') +
+  ggtitle('Number of Backers by Category') +
+   theme(legend.position="none", axis.text.x = element_text(angle = 60, hjust = 1), axis.ticks.x = element_blank())
+
+p3 <- ggplot(df, aes(x = top_category, y = goal)) +
+  geom_jitter(aes(color = state)) +
+  theme_tufte() + xlab('State') + ylab('Goal') +
+  ggtitle('Goal Amount by Category') +
+   theme(legend.position="none", axis.text.x = element_text(angle = 60, hjust = 1), axis.ticks.x = element_blank())
+
+p4 <- ggplot(df, aes(x = top_category, y = ratio)) +
+  geom_jitter(aes(color = state)) +
+  theme_tufte() + xlab('State') + ylab('Goal') +
+  ggtitle('Achievement Ratio by Category') +
+   theme(legend.position="none", axis.text.x = element_text(angle = 60, hjust = 1), axis.ticks.x = element_blank())
+```
+
+First, I will explore the relationship between the amount pledged to kickstarter projects by category. For all the plots in this section, blue points represent successful projects, and red points represent unsuccessful ones (live projects have been removed from the data for this section). To save on memory space I have used a random sample of 25000 observations instead of the full dataset.
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+p1
+```
+
+As can be seen from the plot aove, technology projects receive the most amount of money pledged among all the categories, followed by design and games. More artistic endeavors such as theater, dance and crafts do not have nearly as much money pledged, though this could be because the funding requirements for these projects are also lower.
+
+Next I will look at the relationship between the number of backers and the project category.
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+p2
+```
+
+
+Again, the same pattern holds as with the amount pledged - technology, games and design receive the most backers, while theater, dance and other artistic projects receive considerably fewer backers.
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+p3
+```
+
+
+Unsurprisingly, projects with the highest goal amounts are the ones that fail, and this is consistent across all categories (as can be seen by the red dots being clustered at the top). 
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+p4
+```
+
+When we adjust the pledged amount by the goal to obtain the achivement ratio, we observe an almost uniform performance across all categories, with a few outliers in a few categories.
+
+# Writing your success story
+
+## 2a) Cleaning the Text and Word Cloud
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+# Sampling
+
+# succ_sample <- kickstarter %>%
+#   filter(state == 'successful') %>%
+#   mutate(ratio = pledged / goal) %>%
+#   arrange(desc(ratio)) %>%
+#   top_n(1000)
+#save(succ_sample, file = 'succ_sample.RData')
+load('succ_sample.RData')
+# succ_text <- data.frame(doc_id = c(1:1000), text = succ_sample$blurb, stringsAsFactors = FALSE)
+# succ_source <-  DataframeSource(succ_text)
+# succ_corpus <- VCorpus(succ_source)
+
+
+# fail_sample <- kickstarter %>%
+#   filter((state != 'successful') & (state != 'live')) %>%
+#   mutate(ratio = pledged / goal)
+# fail_sample <- slice(fail_sample, sample(1:nrow(fail_sample), 1000, replace = F))
+# save(fail_sample, file = 'fail_sample.RData')
+load('fail_sample.RData')
+# fail_text <- data.frame(doc_id = c(1:1000), text = fail_sample$blurb, stringsAsFactors = FALSE)
+# fail_source <-  DataframeSource(fail_text)
+# fail_corpus <- VCorpus(fail_source)
+
+```
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+# Cleaning for text analysis
+
+new_stops <- c('help', 'will', 'new', 'can', 'support', 'make', 'create', 'need', 'fund', 'funding', 'world','want', stopwords('en'))
+
+clean_corpus <- function(corpus){
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  corpus <- tm_map(corpus, removeNumbers)
+  corpus <- tm_map(corpus, content_transformer(removePunctuation))
+  corpus <- tm_map(corpus, stripWhitespace)
+  corpus <- tm_map(corpus, removeWords, new_stops)
+  return(corpus)
+}
+
+stemCompletion2 <- function(x, dictionary) {
+   x <- unlist(strsplit(as.character(x), " "))
+   x <- x[x != ""]
+   x <- stemCompletion(x, dictionary=dictionary)
+   x <- paste(x, sep="", collapse=" ")
+   PlainTextDocument(stripWhitespace(x))
+}
+```
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+## Not gonna wait 20 minutes to knit this
+# succ_clean <- clean_corpus(succ_corpus)
+# succ_stemmed <- tm_map(succ_clean, stemDocument)
+# succ_comp <- lapply(succ_clean, stemCompletion2, 
+#                      dictionary=succ_clean)
+# succ_comp <- as.VCorpus(succ_comp)
+# save(succ_comp, file = "succ_comp.RData")
+load("succ_comp.RData")
+
+# fail_clean <- clean_corpus(fail_corpus)
+# fail_stemmed <- tm_map(fail_clean, stemDocument)
+# fail_comp <- lapply(fail_clean, stemCompletion2, 
+#                      dictionary=fail_clean)
+# fail_comp <- as.VCorpus(fail_comp)
+# save(fail_comp, file = "fail_comp.RData")
+load("fail_comp.RData")
+
+succ_dtm <- DocumentTermMatrix(succ_comp)
+fail_dtm <- DocumentTermMatrix(fail_comp)
+# succ_dtm <- as.matrix(succ_dtm)
+# fail_dtm <- as.matrix(fail_dtm)
+
+succ_tdm <- TermDocumentMatrix(succ_comp)
+fail_tdm <- TermDocumentMatrix(fail_comp)
+# succ_tdm <- as.matrix(succ_tdm)
+# fail_tdm <- as.matrix(fail_tdm)
+```
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+succ_td <- tidy(succ_tdm)
+succ_td <- succ_td %>% group_by(term) %>%
+            summarise(n = sum(count)) %>%
+            top_n(n = 100, wt = n)  %>%
+            ungroup()
+
+fail_td <- tidy(fail_tdm)
+fail_td <- fail_td %>% group_by(term) %>%
+            summarise(n = sum(count)) %>%
+            top_n(n = 100, wt = n)  %>%
+            ungroup() %>%
+            mutate(term = reorder(term, n))
+```
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+wordcloud(succ_td$term, succ_td$n, max.words = 50, colors = "dark green")
+```
+
+The wordcloud above shows the 50 most popular words that appear in successful blurbs.
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+wordcloud(fail_td$term, fail_td$n, max.words = 50, colors = "red")
+```
+
+The wordcloud above shows the 50 most popular words that appear in unsuccessful blurbs. There does not seem to be much of a difference between the two word clouds, except that the unsuccessful blurbs seem to focus more on artistic endeavors.
+
+
+## 2b) Success in words
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+top_words <- inner_join(succ_td, fail_td, by = 'term', suffix = c('.success', '.failure'))
+top_words <- top_words %>%
+  mutate(total = n.success + n.failure) %>%
+  arrange(desc(total))%>%
+  top_n(20)
+```
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+pyramid.plot(top_words$n.success, top_words$n.failure,
+                  labels = top_words$term, 
+             gap = 10, 
+             top.labels = c("Success", " ", "Failure"), 
+             main = "Pyramid Plot of Top Words", 
+             laxlab = NULL, 
+             raxlab = NULL, 
+             unit = NULL, 
+             labelcex=0.5)
+```
+
+The pyramid plot above shows the top 20 common words between successful and unsuccessful projects. Games seem to appear more frequently in the blurbs for successful projects, while blurbs for unsuccessful projects seem more oriented around artistic endeavors ('album', 'book', 'music'). This is congruent with our results from the wordclouds above.
+
+## 2c) Simplicity as a virtue
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+stopifnot(require(quanteda))
+
+readable <- rbind(succ_sample, fail_sample)
+readable_text <- data.frame(doc_id = c(1:2000), text = readable$blurb, stringsAsFactors = FALSE)
+readable_source <-  DataframeSource(readable_text)
+readable_corpus <- VCorpus(readable_source)
+readable_corpus <- corpus(readable_corpus)
+readability <- textstat_readability(readable_corpus, measure = 'Flesch')
+readability <- cbind(readability, readable$pledged)
+readability$success <- c(rep('success', 1000), rep('failure', 1000))
+colnames(readability) <- c('document', 'readability', 'pledged', 'success')
+```
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+ggplot(data=readability, aes(x=log(pledged),y=readability)) + 
+  geom_point(alpha = 0.5) + 
+  geom_smooth() + 
+  guides(size=FALSE) + theme_tufte() + 
+  ylab("Flesch Reading Ease")
+```
+
+From the plot above there seems to be little relationship between reading ease and the amount of money pledged, especially if the outliers are ignored.
+
+# Sentiment
+
+## 3a) Stay positive
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+pve <- read.table("positive-words.txt", as.is=T)
+nve <- read.table("negative-words.txt", as.is=T)
+
+df_3_sample <- rbind(succ_sample, fail_sample)
+df_3_tokens <- tokens(readable_corpus)
+df_3a <- readable %>% transmute(Document = c(1:2000), 
+                            Ratio = ratio,
+                            Pledged = pledged)
+
+df_3a$pve.count <- NA
+df_3a$nve.count <- NA
+df_3a$sent <- NA
+  
+for (i in 1:2000){   
+    df_3a$pve.count[i] <-  sum(df_3_tokens[[i]]%in%pve[,1])
+    df_3a$nve.count[i] <-  sum(df_3_tokens[[i]]%in%nve[,1])
+    df_3a$sent <- (df_3a$pve.count - df_3a$nve.count)/(df_3a$pve.count+df_3a$nve.count)
+  }
+
+df_3a$sent[is.na(df_3a$sent)] <- 0
+df_3a$sent[df_3a$sent < 0] <- -1
+df_3a$sent[df_3a$sent > 0] <- 1
+
+df_3a$sent <- factor(df_3a$sent)
+levels(df_3a$sent) <- c("Negative", "Neutral", "Positive")
+
+df_3a_bar <- df_3a %>% group_by(sent) %>%
+  summarize(Avg_Pledged = mean(Pledged),
+            Avg_Ratio = mean(Ratio))
+```
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+ggplot(df_3a_bar) + geom_bar(aes(x = sent, y = Avg_Pledged, fill = sent), stat = 'identity') + theme_tufte() + labs(x = "Blurb Sentiment", y = "Average Pledged Amount")
+```
+
+As seen in the bar graph above, positive blurbs receive more pledged money than neutral ones, which in turn receive more money than negative ones.
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+ggplot(df_3a_bar) + geom_bar(aes(x = sent, y = Avg_Ratio, fill = sent), stat = 'identity') + theme_tufte() + labs(x = "Blurb Sentiment", y = "Average Achievement Ratio")
+```
+
+Strangely, there is no discernible pattern when looking at the achievement ratio (pledged/goal), but this is to be expected since we saw that the achievement ratio is an uninformative measure of success in 2c) above.
+
+## 3b) Positive vs Negative
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+q3b_succ_td <- tidy(succ_tdm)
+q3b_fail_td <- tidy(fail_tdm)
+df_3b_td <- rbind(q3b_succ_td, q3b_fail_td)
+
+df_3b_td <- df_3b_td %>% mutate(sentiment = NA)
+df_3b_td$sentiment[df_3b_td$term %in% pve[,1]] <- 1
+df_3b_td$sentiment[df_3b_td$term %in% nve[,1]] <- -1
+df_3b_td$sentiment[is.na(df_3b_td$sentiment)] <- 0
+df_3b_td <- filter(df_3b_td, df_3b_td$sentiment == 1 | df_3b_td$sentiment == -1)
+
+
+df_3b_tdm <- cast_tdm(df_3b_td, term=term, document=sentiment, value=count)
+df_3b_mat <- as.matrix(df_3b_tdm)
+colnames(df_3b_mat) <- c("Positive", "Negative")
+comparison.cloud(df_3b_mat, scale=c(4,.1), 
+                 colors = c('dark green', 'red'), 
+                 max.words = 100, title.size=2)
+```
+
+The word cloud above shows the most frequently used positive and negative words in the kickstarter blurbs.'Limited' seems to be the most popular negative word used, though it is questionable if this is truly negative in this context since it might simply denote exclusivity rather than some kind of impediment.
+
+## 3c) Get in their mind
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+# nrc <- get_sentiments('nrc')
+# df_3c <- df_3_sample %>% select(blurb, pledged, ratio, state) %>%
+#   mutate(id = c(1:2000))
+# df_3c$sample = as.factor(df_3c$sample)
+# nrc_sent <- get_nrc_sentiment(df_3c$blurb, cl = NULL, language = "english")
+# df_3c <- cbind(df_3c, nrc_sent)
+```
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+# df_3c_pyramid <- df_3c %>% group_by(state) %>%
+#   summarize(anger = mean(anger),
+#             anticipation = mean(anticipation),
+#             disgust = mean(disgust),
+#             fear = mean(fear),
+#             joy = mean(joy),
+#             sadness = mean(sadness),
+#             surprise = mean(surprise),
+#             trust = mean(trust)) %>%
+#             t() 
+# 
+# df_3c_pyramid <- as.data.frame(df_3c_pyramid)
+# df_3c_pyramid <- df_3c_pyramid[-1, ]
+# df_3c_pyramid <- df_3c_pyramid %>% select(V2, V3)
+# colnames(df_3c_pyramid) <- c('failed', 'successful')
+# df_3c_pyramid$emotion <- c('anger', 'anticipation', 'disgust', 'fear', 'joy', 'sadness', 'surprise', 'trust')
+# df_3c_pyramid$successful <- as.numeric(as.character(df_3c_pyramid$successful))
+# df_3c_pyramid$failed <- as.numeric(as.character(df_3c_pyramid$failed))
+# df_3c_pyramid <- df_3c_pyramid %>%
+#   mutate(total = failed + successful) %>%
+#   arrange(total)
+# save(df_3c_pyramid, file = 'df_3c_pyramid.RData')
+
+load('df_3c_pyramid.RData')
+```
+
+```{r, warning=FALSE, echo=FALSE, message = FALSE}
+pyramid.plot(df_3c_pyramid$successful, df_3c_pyramid$failed,
+                  labels = df_3c_pyramid$emotion,
+             gap = .1, 
+             top.labels = c("Success", " ", "Failure"), 
+             main = "Pyramid Plot of Average NRC Emotion Score", 
+             laxlab = NULL, 
+             raxlab = NULL, 
+             unit = NULL, 
+             labelcex=0.5)
+```
+
+The pyramid plot above shows the average NRC Word-Emotion Association Lexicon score for each emotion for successful and unsuccessful projects. Surprisingly, successful projects also had higher scores for fear, anger and disgust. This indicates to me that the main difference in the sentiments of successful and unsuccessful projects is that successful projects are simply more **emotive** -- but the emotions expressed are necessarily positive (as classified by the NRC).

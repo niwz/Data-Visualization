@@ -1,0 +1,423 @@
+---
+title: "Data Visualization Assignment 1 - Winter Olympics"
+author: "Nicholas Wong"
+date: "February 15, 2018"
+output: 
+  html_document:
+    keep_md: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+library(knitr)
+opts_chunk$set(fig.path="images/",
+               cache.path="cache/",
+               cache=FALSE,
+               echo=TRUE,
+               message=FALSE,
+               warning=FALSE)  
+```
+
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE}
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(reshape2)
+library(gridExtra)
+library(lattice)
+library(ggflags)
+library(countrycode)
+library(tidyr)
+library(scales)
+library(plotly)
+```
+
+
+## 1. Medal Counts over Time
+
+I decided to merge EUA, FRG and GDR into Germany, and EUN and URS into Russia for the purpose of this visualization exercise.
+```{r, echo=FALSE}
+# Loading the data
+winter <- read.csv("winter.csv")
+dictionary <- read.csv("dictionary.csv")
+data <- merge(dictionary, winter, by.x = "Code", by.y = "Country", all = T)
+rm(winter, dictionary)
+```
+
+```{r, echo=FALSE}
+# Redesignation
+germanic = c('EUA', 'FRG', 'GDR')
+
+for (i in germanic){
+  data$Country[data$Code == paste(i)] <- "Germany"
+  data$Population[data$Code == paste(i)] <- data$Population[data$Country  == 'Germany'][c(1)]
+  data$GDP.per.Capita[data$Code == paste(i)] <- data$GDP.per.Capita[data$Country  == 'Germany'][c(1)]
+}
+
+comrades = c('EUN', 'URS')
+
+for (i in comrades){
+  data$Country[data$Code == paste(i)] <- "Russia"
+  data$Population[data$Code == paste(i)] <- data$Population[data$Country  == 'Russia'][c(1)]
+  data$GDP.per.Capita[data$Code == paste(i)] <- data$GDP.per.Capita[data$Country  == 'Russia'][c(1)]
+}
+
+data$Country[data$Code == 'TCH'] <- "Czech Republic"
+data$Population[data$Code == 'TCH'] <- data$Population[data$Country  == 'Czech Republic'][c(1)]
+data$GDP.per.Capita[data$Code == 'TCH'] <- data$GDP.per.Capita[data$Country  == 'Czech Republic'][c(1)]
+
+data$Country[data$Code == 'YUG'] <- "Czech Republic"
+data$Population[data$Code == 'TCH'] <- data$Population[data$Country  == 'Czech Republic'][c(1)]
+data$GDP.per.Capita[data$Code == 'TCH'] <- data$GDP.per.Capita[data$Country  == 'Czech Republic'][c(1)]
+
+
+# Flag codes
+data <- data %>%
+  mutate(fcode = countrycode(Country, "country.name", "iso2c")) %>%
+  mutate(fcode = tolower(fcode))
+```
+
+I focus only on the top 10 most successful countries by medal count for this question.
+
+```{r, echo=FALSE}
+# Pre-processing
+
+medaldata <- data %>% group_by(Country, fcode) %>%
+  summarize(`Gold Medals` = sum(Medal == 'Gold', na.rm = T),
+            `Silver Medals` = sum(Medal == 'Silver', na.rm = T),
+            `Bronze Medals` = sum(Medal == 'Bronze', na.rm = T)) %>%
+  mutate(Total = `Gold Medals` + `Silver Medals` + `Bronze Medals`) %>%
+  arrange(desc(Total))
+medaldata$Country <- factor(medaldata$Country)
+medaldata <- medaldata[c(1:10), ]
+```
+
+In the bar chart below I show how many winter games each of the top 10 most successful countries has participated in. The barplot makes it easy for the reader to make quick comparisons between countries.
+
+```{r, echo=FALSE}
+# How many games each country participated in
+
+participation <- data %>% group_by(Country, fcode) %>%
+  filter(Country %in% medaldata$Country) %>%
+  summarize(Games = length(unique(Year))) %>%
+  arrange(desc(Games))
+
+partplot <- ggplot(participation, aes(reorder(Country, Games), Games)) + 
+  geom_bar(aes(fill = Country), stat = 'identity') + 
+  geom_flag(y = - 1.5 , aes(country = fcode), size = 10)
+partplot1 <- partplot + theme_tufte() + 
+  scale_y_continuous(expand = c(0.1, 1)) +
+  theme(axis.text.x = element_blank(), axis.ticks = element_blank(), legend.position = 'none') + 
+  geom_text(aes(label = Games), hjust = 1.5, color = 'white') + coord_flip()
+partplot1 <- partplot1 + ylab("") + xlab("") + ggtitle("Number of Games for Top 10 Countries") + theme(plot.title = element_text(family = 'mono', color = 'black', size = '12'))
+
+partplot1
+```
+
+Next I show how many total medals each of these countries won in a barplot, with 3 further bar plots to show how the distribution changes for each category of medals. 
+
+```{r, echo=FALSE}
+bp <- ggplot(medaldata) + 
+  geom_bar(aes(x = reorder(Country, Total), y = Total), stat = 'identity') + 
+  theme_tufte() +
+  theme(axis.ticks.y = element_blank(), legend.position = 'none') +
+  coord_flip() + xlab("") + ylab("") + ggtitle("Total Medals")
+
+bp1 <- ggplot(medaldata) + geom_bar(aes(x = reorder(Country, `Gold Medals`), y = `Gold Medals`), fill = 'gold', stat = 'identity') + theme_tufte() + theme(axis.ticks.y = element_blank(), legend.position = 'none') + coord_flip() + xlab("") + ylab("") + ggtitle("Gold Medals")
+
+bp2 <- ggplot(medaldata) + geom_bar(aes(x = reorder(Country, `Silver Medals`), y = `Silver Medals`), fill = '#C0C0C0', stat = 'identity') + theme_tufte() + theme(axis.ticks.y = element_blank(), legend.position = 'none') + coord_flip() + xlab("") + ylab("") + ggtitle("Silver Medals")
+
+bp3 <- ggplot(medaldata) + geom_bar(aes(x = reorder(Country, `Bronze Medals`), y = `Bronze Medals`), fill = '#cd7f32', stat = 'identity') + theme_tufte() + theme(axis.ticks.y = element_blank(), legend.position = 'none') + coord_flip() + xlab("") + ylab("") + ggtitle("Bronze Medals")
+
+grid.arrange(bp, bp1, bp2, bp3, nrow = 2)
+```
+
+
+Lastly, I use a series of sparklines to show the trends in total medal wins over time for each of these 10 countries. 
+
+```{r, echo=FALSE}
+# Trends over time
+
+timeseries <- data %>% group_by(Country) %>%
+  group_by(Country, Year) %>%
+  filter(Year >= 1964) %>%
+  summarize(Total = sum(Medal == 'Gold' | Medal == 'Silver' | Medal == 'Bronze' , na.rm = T)) %>% na.omit %>%
+  filter(Country %in% medaldata$Country)
+
+
+for (i in unique(timeseries$Country)){
+  assign(paste(i), ggplot(timeseries[which(timeseries$Country == paste(i)), ]) + geom_line(aes(x = Year, y = Total)) + theme_tufte() + xlab(paste(i)) + ylab('')+ theme(axis.ticks.x = element_blank(), axis.ticks.y = element_blank(), axis.text.y = element_blank())) 
+}
+
+grid.arrange(Russia, `United States`, Germany, Canada, Norway, Finland, Sweden, Switzerland, Austria, `Czech Republic`, nrow = 5, ncol = 2, top = 'Medal Trends for the Past 50 Years')
+
+```
+
+```{r, echo = FALSE}
+rm(Russia, `United States`, Germany, Canada, Norway, Finland, Sweden, Switzerland, Austria, `Czech Republic`)
+```
+
+## 2. Medal Counts adjusted by Population, GDP
+
+I will use an points index in which gold medals are given 3 points, silver medals are given 2 points and bronze medals are given 1 point. I will use this index to make comparisons of success at the Olympics among countries.
+
+```{r, echo=FALSE}
+indices <- data %>% group_by(Country, GDP.per.Capita, Population) %>%
+  filter(Year >= 1964) %>%
+  summarize(Index = 3*sum(Medal == 'Gold') + 2*sum(Medal == 'Silver') + sum(Medal == 'Bronze')) %>%
+  mutate(Index_GDP = Index / GDP.per.Capita * 1000) %>%
+  mutate(Index_Pop = Index / Population * 1000000) %>%
+  arrange(desc(Index))
+
+indices <- indices[c(1:10), ]
+```
+
+```{r, echo=FALSE}
+Unadj_Rank = order(indices$Index)
+GDP_Rank = order(indices$Index_GDP)
+Pop_Rank = order(indices$Index_Pop)
+rankings = cbind(indices[, 1], Unadj_Rank, GDP_Rank, Pop_Rank)
+```
+
+In the following line graph, I show how the unadjusted country ranking of Olympic success changes after dividing by GDP per capita.
+
+```{r, echo=FALSE}
+labels <- paste(rankings$Country)
+rankings$gdp_delta <- ifelse((rankings$GDP_Rank - rankings$Unadj_Rank) < 0, "tomato2", "green")
+
+p <- ggplot(rankings) + geom_segment(aes(x = 1, xend = 2, y = Unadj_Rank, yend = GDP_Rank, col = gdp_delta), size= .75, show.legend = F) + 
+                  geom_vline(xintercept=1, linetype="dashed", size=.1) + 
+                  geom_vline(xintercept=2, linetype="dashed", size=.1) +
+                  scale_color_manual(labels = c("Up", "Down"), 
+                                     values = c("green", "tomato2")) +
+                  ggtitle("Adjusting Success for GDP") +  # Axis labels
+                  xlim(.7, 2.3) + ylim(0,11) + theme_tufte() +
+                  theme(axis.line=element_blank(),
+                        axis.text.x=element_blank(),
+                        axis.text.y=element_blank(),
+                        axis.ticks=element_blank(),
+                        axis.title.x=element_blank(),
+                        axis.title.y=element_blank(),
+                        legend.position="none",
+                        plot.title = element_text(hjust = 0.5))
+
+p <- p + geom_text(label = labels, y = rankings$Unadj_Rank, x = rep(1, 10), hjust = 1.1, size = 3.5, show.legend = FALSE) + geom_text(label = labels, y=rankings$GDP_Rank, x = rep(2, nrow(rankings)), hjust = -0.1, size = 3.5)
+
+p1 <- p + geom_text(label = "Unadjusted Ranking", x=1, y = 11, hjust = 1.1 , size = 3) + geom_text(label = "Adjusted Ranking", x = 2, y = 11, hjust = -0.05 , size = 3)
+p1
+```
+
+As we can see from the graph, the bottom 3 countries (Austria, Switzerland and Czech Republic) do not change their positions in the rank after accounting for GDP per capita, but Germany and the United States fall significantly. Notice that the line is red when the change is negative and green otherwise.
+
+In the next graph I will repeat the exercise except adjusting for population instead of GDP per capita.
+
+```{r, echo=FALSE}
+rankings$pop_delta <- ifelse((rankings$Pop_Rank - rankings$Unadj_Rank) < 0, "tomato2", "green")
+p2 <- ggplot(rankings) + 
+      geom_segment(aes(x = 1, xend = 2, y = Unadj_Rank, yend = Pop_Rank, col = pop_delta),
+                   size= .75, show.legend = F) + 
+      geom_vline(xintercept = 1, linetype = "dashed", size=.1) + 
+      geom_vline(xintercept = 2, linetype = "dashed", size=.1) +
+      scale_color_manual(labels = c("Up", "Down"), 
+                         values = c("green", "tomato2")) +
+      ggtitle("Adjusting Success for Population") + 
+      xlim(.7, 2.3) + ylim(0,(11)) + theme_tufte() +
+      theme(axis.line=element_blank(),axis.text.x=element_blank(),
+            axis.text.y=element_blank(),
+            axis.ticks=element_blank(),
+            axis.title.x=element_blank(),
+            axis.title.y=element_blank(),
+            legend.position="none",
+            plot.title = element_text(hjust = 0.5))
+
+p2 <- p2 + geom_text(label = labels, y = rankings$Unadj_Rank, x = rep(1, 10), hjust = 1.1, size = 3.5, show.legend = FALSE) + geom_text(label = labels, y=rankings$Pop_Rank, x = rep(2, nrow(rankings)), hjust = -0.1, size = 3.5) 
+
+p2 <- p2 + geom_text(label="Unadjusted Ranking", x=1, y = 11, hjust = 1.1 , size = 3) + geom_text(label="Adjusted Ranking", x = 2, y = 11, hjust = -0.1 , size = 3) 
+p2
+```
+From the graph above we see that many high-performing countries such as Russia, the United States, Canada and Germany drop drastically in the rankings to the bottom half, which indicates that their success is primarily a factor of their large populations (and hence large talent pools). Smaller Scandinavian countries such as Norway and Sweden seem to perform well despite their low populations.
+
+
+## 3. Host Country Advantage
+
+```{r, echo = FALSE, message = FALSE}
+stopifnot(require(rvest))
+stopifnot(require(stringr))
+wiki_hosts <- read_html("https://en.wikipedia.org/wiki/Winter_Olympic_Games")
+hosts <- html_table(html_nodes(wiki_hosts, "table")[[5]], fill=TRUE)
+hosts <- hosts[-1,1:3]
+hosts$city <- str_split_fixed(hosts$Host, n=2, ",")[,1]
+hosts$country <- str_split_fixed(hosts$Host, n=2, ",")[,2]
+```
+
+For this question we run into the issue of the increasing number of medals that have been awarded in recent times. As we can see from the line graph below, the number of medals awarded at the Winter Olympics have steadily increased since the very first game, and the rate of increase has also accelerated since the 1984 Sarajevo games. This is possibly due to more events being added to the games which allows for more opportunities for countries to win medals.
+
+```{r, warning=FALSE, echo=FALSE}
+#Illustrating problem with simple average using trend
+
+medaltrend <- data %>% group_by(Year) %>%
+  summarize(`Gold Medals` = sum(Medal == 'Gold', na.rm = T),
+            `Silver Medals` = sum(Medal == 'Silver', na.rm = T),
+            `Bronze Medals` = sum(Medal == 'Bronze', na.rm = T)) %>%
+  mutate(Total = `Gold Medals` + `Silver Medals` + `Bronze Medals`)
+
+medaltrendplot<- ggplot(medaltrend) + geom_line(aes(Year, Total)) + geom_vline(xintercept = 1984, color = 'red') + theme_tufte()
+medaltrendplot
+```
+
+However, this presents a problem for calculating the host nation advantage since we can no longer simply compare the host nation's performance with its mean performance across all games, since any host advantage in the early years of the game will be outweighed by the effect of the increased number of medals given out in recent years and vice versa.
+
+To overcome this problem, I use a **k=2 nearest neighbors** estimation for the expected value of the number of medals won for a specific year, and take the difference between this estimate and the actual number of medals won by the host in that year.
+
+```{r, echo=FALSE}
+#Processing host data
+
+hosts_compare <- hosts %>% select('Year', 'country') %>%
+  filter(!(Year %in% c('1940', '1944', '2018', '2022')))
+
+hosts_compare$country <- trimws(hosts_compare$country, which = "left")
+
+hosts_compare$home = c(rep(0, nrow(hosts_compare)))
+for (i in 1:nrow(hosts_compare)){
+  temp = filter(data, Country == hosts_compare[i, 2] & Year == hosts_compare[i, 1])[, 12]
+  hosts_compare[i, 3] = length(temp)
+}
+
+hosts_compare$mov_avg = c(rep(0, nrow(hosts_compare)))
+for (i in 5:nrow(hosts_compare)-1){
+  temp_mean = filter(data, Country == hosts_compare[i, 2]) %>%
+        filter(Year == hosts_compare[i-1, 1] | Year == hosts_compare[i+1, 1]) %>%
+    summarize(mean = sum(Medal == 'Gold' | Medal == 'Silver' | Medal == 'Bronze' , na.rm = T)/2)
+  hosts_compare[i, 4] = temp_mean
+}
+
+hosts_compare[18, 4] <- filter(data, Country == 'Russia') %>%
+        filter(Year == '2010' | Year == '2006') %>%
+    summarize(mean = sum(Medal == 'Gold' | Medal == 'Silver' | Medal == 'Bronze' , na.rm = T)/2)
+
+hosts_compare <- hosts_compare %>% mutate(diff = round(home - mov_avg)) %>%
+  filter(!(Year %in% c('1924', '1928', '1932', '1936')))
+
+hosts_compare[10, c(3, 5)] <- 1
+```
+
+```{r, echo=FALSE}
+# Lollipop Graph
+
+lol <- ggplot(hosts_compare, aes(x = Year, y = diff, label = diff)) + 
+  geom_point(stat='identity', fill="black", size = 7)  +
+  geom_segment(aes(y = 0, 
+                   x = Year, 
+                   yend = diff, 
+                   xend = Year), 
+               color = "black") +
+   geom_hline(yintercept = 0, linetype = "dashed", size=.1) +
+  geom_text(color = "white", size = 3) +
+  theme_tufte() +
+  labs(title = "The Host Nation Advantage", 
+       subtitle = "Why leave home?")  +
+  ylim(- 20, 70) +
+  theme(axis.ticks.x = element_blank(), axis.ticks.y = element_blank(), axis.text.x = element_text(angle = 60, hjust = 1), legend.position = 'none') + labs(x = '', y = 'Difference')
+
+lol
+```
+
+As we can see from the lollipop graph above, there is generally a small host nation advantage, with the host nation outperforming the k=2 nearest neighbors estimate of its expected performance for most years except for Canada, Norway and Japan in 1988, 1994 and 1998 respectively. The host nation advantage was especially pronounced for the US an the 2002 games, and also for Russia in the 2014 games, though the latter may be directly attributable to the widespread cheating among Russian athletes (which resulted in a ban on the Russian team for the ongoing 2018 games).
+
+## 4. Country success by sport / discipline / event
+
+### As a last country level comparison, let's consider comparing countries' success by looking at particular sports, disciplines, and/or events. Make a choice of which kind of comparison reveals some interesting comparison here. Feel free to focus on a subset of data (say one specific sport), only look at a single country etc.
+
+For this question I will look at whether each sport is dominated by a single country. To do this, I look at the share of gold medals won by a each country for each sport in the dataset, and then selecting the country with the highest share of gold medals for each sport. I then represent this in a bar graph for ease of comparison among sports.
+
+```{r, echo=FALSE}
+dominance <- data %>% group_by(Sport, Country, fcode) %>%
+  summarize(Gold = sum(Medal == 'Gold')) %>% 
+  group_by(Sport) %>%
+  mutate(Dominance = Gold / sum(Gold)) %>%
+  filter(Dominance == max(Dominance))
+dominance$Dominance = round(dominance$Dominance*100, 1)
+```
+
+```{r, echo=FALSE}
+dom_plot <- ggplot(dominance, aes(reorder(Sport, Dominance), Dominance)) + geom_bar(aes(fill = Country), stat = 'identity') + coord_flip() + theme_tufte()
+dom_plot <- dom_plot + scale_y_continuous(expand = c(0.1, 1)) + geom_flag(y = -5 , aes(country = fcode), size = 10) +  theme(axis.ticks = element_blank(), axis.text.x = element_blank(), axis.text.y = element_text(face = "bold", size = 12), legend.position = 'none') + geom_text(aes(label = paste(Country, ', ', Dominance, '%', sep='')), hjust = 1.03, color = 'white') 
+dom_plot <- dom_plot + labs(x = '', y = 'Percentage of Gold Medals Won',
+                            title = 'Most Domninant Country by Sport',
+                            subtitle = 'Germany: The Giant of Luge-ing')
+dom_plot
+```
+
+
+## 5. Most successful athletes
+
+### Now, let's look at the most successful athletes. Provide a visual display of the most successful athletes of all time. Consider using other information on gender, sport, discipline, event, year, and country to make the display more informative.
+
+```{r, echo=FALSE}
+top_athletes <- data %>% group_by(Athlete, Country, Sport, Gender, fcode) %>% 
+  summarize(Total = sum(Medal == "Gold" | Medal == "Silver" | Medal == "Gold" , na.rm = T)) %>%
+  arrange(desc(Total))
+top_10_athletes <- top_athletes[c(1:10), ]
+```
+
+```{r, echo=FALSE}
+ath_plot <- ggplot(top_10_athletes, aes(x = reorder(Athlete, Total), y = Total)) + 
+  geom_point(col = "gold", size = 3) +   
+  geom_segment(aes(x = Athlete, 
+                   xend = Athlete, 
+                   y = 0, 
+                   yend = Total - 0.2), 
+               linetype="dashed", 
+               size=0.1, color = 'red') +
+  geom_flag(y = - 1.5 , aes(country = fcode), size = 8) +
+  labs(title = "Most Successful Athletes", 
+       subtitle = "It helps to be descended from the Vikings",
+       x = '', y = '') +  
+  coord_flip() + theme_tufte() + theme(axis.ticks.y = element_blank()) +
+  scale_y_continuous(breaks = c(seq(0, 12, 2)), expand = c(0.1, 1))
+ath_plot
+```
+
+I used a dotplot to visualize the most successful athletes in the Winter Olympics by medal count, and made the dots look like mini gold medals.
+
+## Interactivity
+
+## 6. Make two plots interactive
+
+### Choose 2 of the plots you created above and add interactivity. Briefly describe to the editor why interactivity in these visualization is particularly helpful for a reader.
+
+I chose to make the two line plots interactive as it is difficult for the reader to read off the exact values of line graphs. By hovering the cursor over any point in the line graph, the interactive visualization will return information about the graph to the reader.
+
+
+```{r, message = FALSE, warning = FALSE, echo=FALSE}
+time_plot <- ggplot(timeseries) + geom_line(aes(x = Year, y = Total, color = Country)) + theme_fivethirtyeight()
+ggplotly(time_plot)
+```
+
+
+```{r, message = FALSE, warning = FALSE, echo=FALSE}
+ggplotly(medaltrendplot)
+```
+
+
+## 7. Data Table
+
+I used the modified version of the table from Question 4 above to let readers explore the total medal performance of each country as well as its share of the total number of medals available for each sport.
+
+```{r, message = FALSE, warning = FALSE, echo=FALSE}
+performance <- data %>% group_by(Sport, Country) %>%
+  summarize(Total = sum(Medal == 'Gold' | Medal == 'Silver' | Medal == 'Bronze' , na.rm = T)) %>%
+  group_by(Sport) %>%
+  mutate(Share = Total / sum(Total)) %>%
+  na.omit()
+performance$Share = round(performance$Share*100, 1)
+
+stopifnot(require(DT))
+datatable(performance, filter = 'top')
+```
+
+
