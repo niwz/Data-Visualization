@@ -1,0 +1,330 @@
+---
+title: "HW4"
+author: "Nicholas Wong"
+date: "April 11, 2018"
+output: 
+  html_document:
+    keep_md: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(knitr)
+opts_chunk$set(fig.path="images/",
+               cache.path="cache/",
+               cache=FALSE,
+               echo=TRUE,
+               message=FALSE,
+               warning=FALSE)  
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+packages <- c("devtools","knitr","widgetframe","readr",
+              "ggplot2", "svglite","rsvg","tidyverse",
+              "ggraph","igraph","tidygraph", "lubridate",
+              "gganimate","randomNames","threejs","visNetwork",
+              "ergm","tweenr","rtweet","twitteR", "kableExtra", 
+              "ggthemes","DT", "networkD3", "dplyr", "ggplot2", "plotrix", "wordcloud", "ggrepel", " lubridate", "DT", 'reshape2')
+library(easypackages)
+libraries(packages)
+set.seed(42)
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+sen_f <- read_csv('senators_follow.csv')
+sen_t <- read_csv('senators_twitter.csv')
+senator_tweets <- readRDS("senator_tweets.RDS")
+```
+
+#1 Who follows whom?
+
+##1a) Network of Followers
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+sen_f <- sen_f %>% filter(following == T)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+network <- graph_from_data_frame(d = sen_f, directed = T)
+
+top_indegree <- igraph::degree(network, v = V(network), mode = "in")  %>%
+  as.data.frame() %>%
+  mutate(Senator = sen_t$Senator)
+colnames(top_indegree)[1] <- 'In_Degree'
+
+top_outdegree <- igraph::degree(network, v = V(network), mode = "out")  %>%
+  as.data.frame() %>%
+  mutate(Senator = sen_t$Senator)
+colnames(top_outdegree)[1] <- 'Out_Degree'
+
+right_join(top_indegree, top_outdegree)
+top_indegree <- top_n(top_indegree, 3, In_Degree)
+top_outdegree <- top_n(top_outdegree, 3, Out_Degree)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+sen_graph <- as_tbl_graph(sen_f, directed = TRUE) %>% 
+   mutate(Centrality = centrality_closeness(),
+          Party = sen_t$`Party affiliation`)
+
+indegree <- igraph::degree(sen_graph, mode = "in")  %>%
+  as.data.frame() %>%
+  mutate(Senator = sen_t$Senator)
+colnames(indegree)[1] <- 'In_Degree'
+top_indegree <- top_n(indegree, 3, In_Degree)
+
+outdegree <- igraph::degree(sen_graph, mode = "out")  %>%
+  as.data.frame() %>%
+  mutate(Senator = sen_t$Senator)
+colnames(outdegree)[1] <- 'Out_Degree'
+top_outdegree <- top_n(outdegree, 3, Out_Degree)
+
+g1 <- ggraph(sen_graph) + 
+  geom_edge_link(alpha = 0.1) +
+  geom_node_point(aes(size = Centrality, color = Party), alpha = 0.5) +
+  guides(size = FALSE) +
+  theme_graph()
+g1
+```
+
+The graph network seems very dense and a lot of the vertices seem to blend together, which indicates that most of the Senators follow each other and are followed back in turn. There seems to be a few outliers among which are represented by the nodes far from the center of the network. Based on the dataframe from which the graph was generated, we see that the four least central nodes in the graph represent Senators Bob Corker (R-TN), Joni Ernst (R-IA), Kamala Harris (D-CA) and Tina Smith (D-MN). It is understandable that Senators Harris and Smith would be outliers in the graph since they were only recently elected to the Senate (in 2016 and 2018 respectively) and so may not have had enough time to be connected with the other Senators.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+top_indegree %>% select(Senator, In_Degree)
+```
+The Senators with the highest in-degree in the network are listed in the table above. There is a 3-way tie for second place, which is why 4 Senators have been shown.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+top_outdegree %>% select(Senator, Out_Degree)
+```
+The Senators with the highest out-degree are listed in the table above.
+
+
+##1b) Communities
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+wc <- cluster_walktrap(sen_graph)
+members <- membership(wc)
+members <- as.data.frame(as.matrix(members))
+members <- add_rownames(members, "VALUE")
+colnames(members)[1] <- "Senator"
+colnames(members)[2] <- "Cluster"
+members$Cluster <- as.factor(members$Cluster)
+members  <- left_join(members, sen_t, by = c("Senator" = "Official Twitter"))
+members  <- members  %>%
+  select(Senator = Senator.y, `Party affiliation`, Cluster) %>%
+  drop_na() %>%
+  filter(`Party affiliation` != "Independent")
+members$`Party affiliation` <- as.factor(members$`Party affiliation`)
+levels(members$`Party affiliation`)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+stopifnot(require(ggthemes))
+stopifnot(require(ggalt))
+members %>% select(-Senator) %>% group_by(`Party affiliation`) %>%
+  summarize(Count = n())
+j1 <- ggplot(members, aes(x = Cluster, y = `Party affiliation`)) +
+  geom_jitter(aes(color = `Party affiliation`), alpha = 0.5, width = 0.3, height = 0.3) + scale_color_manual(values = c('blue', 'red')) + theme_tufte() + theme(axis.ticks = element_blank()) + scale_x_discrete(labels = c('Cluster 1', 'Cluster 2')) + xlab('') + ylab('')
+j2 <- j1 + geom_encircle(s_shape = 0.1, aes(x = Cluster, y = `Party affiliation`), 
+data = members[members$`Party affiliation` == 'Republican Party', ], color="red",size=2, expand=0.14)
+j3 <- j2 + geom_encircle(s_shape = 0.1, aes(x = Cluster, y = `Party affiliation`), 
+data = members[members$`Party affiliation` == 'Democratic Party', ], color="blue",size=2, expand=0.14)
+j3
+```
+
+As seen in the plot above, the two clusters generated by the **cluster_walktrap** command in the igraph package correspond perfectly to the two political parties. This implies that Senators from the same political party are more densely connected to each other in the twitter network.
+
+# 2 What are they tweeting about?
+
+##a) Most Common Topics over Time
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+senator_tweets$hashtags <- tolower(as.character(senator_tweets$hashtags))
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+df_2a <- senator_tweets %>% filter(is_retweet == 'FALSE') %>%
+  mutate(Date = as.Date(created_at)) %>%
+  select(Date, hashtags)
+
+df_2a$Date <- floor_date(df_2a$Date, 'month')
+
+top_hashtags_2a <- df_2a %>% unnest(hashtags) %>% count(hashtags, sort=TRUE) %>% filter(!is.na(hashtags)) %>% top_n(5)
+
+df_2a_ <- df_2a %>% filter(hashtags %in% top_hashtags_2a$hashtags, Date > "2016-01-01") %>%
+  group_by(Date, hashtags) %>% summarize(count = n())
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(df_2a_, aes(x = Date)) + geom_line(aes(y = count, col = hashtags)) +
+  labs(title = 'Top Hashtags Over Time', y = '') + theme_bw()
+```
+
+The line graph above shows the trends over time for the top 5 most-used hashtags in the dataset.*Trumpcare* and *taxreform* seems to have very high peaks, which coincide with the periods in which they were being debated in Congress. *Obamacare* is more of a perennial hashtag, with a sustained interest over a long period of time. *mepolitics* is an inscrutable hashtag, but appears to to be quite persistent over time, perhaps due to the self-centered solipsism of the Senators. Finally, *utpol* refers to the Utah Poll which tracks public sentiment for elections. 
+
+##b) Democrats vs. Republicans
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+df_2b <- left_join(senator_tweets, sen_t, by = c("screen_name" ="Official Twitter")) %>%
+  filter(is_retweet == 'FALSE')
+
+hot_topics_R <- df_2b %>% filter(`Party affiliation` == 'Republican Party') %>%
+  unnest(hashtags) %>% count(hashtags, sort=TRUE) %>% 
+  filter(!is.na(hashtags)) %>% top_n(100)
+
+hot_topics_D <- df_2b %>% filter(`Party affiliation` == 'Democratic Party') %>%
+  unnest(hashtags) %>% count(hashtags, sort=TRUE) %>% 
+  filter(!is.na(hashtags)) %>% top_n(100)
+
+top_hashtags <- inner_join(hot_topics_R, hot_topics_D, by = 'hashtags', suffix = c('.R', '.D')) %>% mutate(total = n.R + n.D) %>% arrange(desc(total)) %>% top_n(10, total)
+
+top_hashtags_melt <- top_hashtags %>% select(hashtags, n.R, n.D) %>% 
+  melt(id.vars = 'hashtags') %>%
+  rename(Party = variable)
+top_hashtags_melt$Party <- ifelse(top_hashtags_melt$Party == 'n.R', 'Republican', 'Democrat')
+top_hashtags_melt$value <- ifelse(top_hashtags_melt$Party == 'Democrat', -1 * top_hashtags_melt$value, top_hashtags_melt$value)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+brks = c(-700, 0, 1000)
+
+ggplot(top_hashtags_melt, aes(x = reorder(hashtags, -value), y = value, fill = Party)) +
+  geom_bar(stat = "identity", width = .6, alpha = 0.7) +
+  scale_y_continuous(breaks = brks) + 
+  coord_flip() +
+  labs(title="Most Popular Hashtags") +
+  theme_tufte() +
+  theme(plot.title = element_text(hjust = .5), 
+        axis.ticks = element_blank()) + 
+  scale_fill_manual(values = c('blue', 'red')) + xlab('') + ylab('')
+```
+
+The plot above shows the top 10 most popular hashtags in the dataset, sorted by party affiliation. It is clear that *tax reform* was the most important topic among Republican Senators by far, which probably refers to the recent *Tax Cuts and Jobs Act of 2017* passed by Congress and signed into law by President Trump in December of 2017.
+
+The most popular hashtag among Democratic Senators is *WV* which presumably stands for West Virginia. All but one of the 818 tweets in the dataset with the WV hashtag can be attributed to the prodigious tweeting of West Virginia Senators Shelley Capito and Joe Manchin, with Senator Manchin's tweets comprising of a majority of the use cases for the hashtag. 
+
+The next most popular hashtag which skewed primarily towards Democrats was *healthcare*, which is more understandable given the efforts of Democratic Senators to protect the Affordable Care Act (aka 'Obamacare') from being repealed by Republicans.
+
+
+##c) Gun Control I - Dems vs. Reps
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+df_2c <- df_2b %>% filter(hashtags == "neveragain" |  hashtags == "guncontrol" |  hashtags == "guncontrolnow" |  hashtags == "enough" | hashtags == "gunsense" | hashtags == "gunsafety" | hashtags == "shooting" | hashtags == "gunviolence" | hashtags == "gunrights" | hashtags == "2ndamendment" |  hashtags == 'secondamendment' | hashtags == "nra" | hashtags == "gunreformnow")
+
+df_2c_ <- df_2c %>% drop_na(`Party affiliation`) %>% group_by(`Party affiliation`, hashtags) %>% summarize(count = n())
+
+df_2c_$count <- ifelse(df_2c_$`Party affiliation` == 'Democratic Party', -1 * df_2c_$count, df_2c_$count)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(df_2c_, aes(x = reorder(hashtags, -count), y = count, fill = `Party affiliation`)) +
+  geom_bar(stat = "identity", width = .6, alpha = 0.7) +
+  coord_flip() +
+  labs(title="Gun Control Hashtags") +
+  theme_tufte() +
+  theme(plot.title = element_text(hjust = .5), 
+        axis.ticks = element_blank()) + 
+  scale_fill_manual(values = c('blue', 'red')) + xlab('') + ylab('')
+```
+
+In the plot above we see that Democrats tweet a lot more about gun control than do Republicans, with *enough* being the overwhelmingly most popular hashtag of choice. When Republicans do tweet about gun control, they tend to focus on the constitutional basis of gun rights rather than on a reaction to a specific incident, which can be seen in the exclusively-Republican hashtags regarding the Second Amendment. 
+
+
+##d) Gun Control II - Parkland Shooting
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+df_2d <- df_2b %>% 
+  mutate(Date = as.Date(created_at)) %>%
+  filter(Date >= "2018-02-14" & Date <= "2018-02-20") %>%
+  select(hashtags, `Party affiliation`, Date) %>%
+  drop_na(hashtags, `Party affiliation`) %>% group_by(`Party affiliation`, hashtags) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count)) %>%
+  top_n(10)
+
+ggplot(df_2d, aes(x = reorder(hashtags, -count), y = count, fill = `Party affiliation`)) +
+  geom_bar(stat = "identity", width = .6, alpha = 0.7) +
+  coord_flip() +
+  labs(title="Hashtags after Parkland") +
+  theme_tufte() +
+  theme(plot.title = element_text(hjust = .5), 
+        axis.ticks = element_blank()) + 
+  scale_fill_manual(values = c('blue', 'green', 'red')) + xlab('') + ylab('')
+```
+
+From the barplot above it seems like there was a muted response on twitter regarding the Parkland shooting in the week which followed the incident, save for the use of the *gunreformnow* and *parkland* hashtags used by Democratic Senators. The most popular theme during this period was about so-called 'Dreamers', i.e. beneficiaries of President Obama's DACA executive order.
+
+#3 Are you talking to me?
+
+## a) Identifying Re-Tweets
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+df_3a <- senator_tweets %>% filter(is_retweet == TRUE) %>%
+  mutate(mentions_screen_name = as.character(mentions_screen_name)) %>%
+  filter(mentions_screen_name %in% sen_t$`Official Twitter`) %>%
+  left_join(sen_t, by = c('screen_name' = 'Official Twitter')) %>%
+  left_join(sen_t, by = c('mentions_screen_name' = 'Official Twitter')) %>%
+  rename(Party = `Party affiliation.x`,
+         `Source Party` = `Party affiliation.y`) %>%
+  select(screen_name, mentions_screen_name, Party, `Source Party`)
+  
+df_3a_ <- df_3a %>% group_by(screen_name, Party, `Source Party`) %>%
+  drop_na() %>%
+  summarize(count = n()) %>%
+  filter(Party != 'Independent' & `Source Party` != 'Independent') 
+
+df_3a_Fr <- df_3a_ %>%
+  dcast(screen_name + Party~`Source Party`, value.var = 'count')
+
+df_3a_Fr$`Democratic Party` <- ifelse(is.na(df_3a_Fr$`Democratic Party`) == T, 0, df_3a_Fr$`Democratic Party`)
+df_3a_Fr$`Republican Party` <- ifelse(is.na(df_3a_Fr$`Republican Party`) == T, 0, df_3a_Fr$`Republican Party`)
+
+df_3a_Fr <- df_3a_Fr %>%
+  mutate(Republican = `Republican Party` / (`Democratic Party` + `Republican Party`),
+         Democrat = `Democratic Party` / (`Democratic Party` + `Republican Party`)) %>%
+  arrange(Republican) 
+df_3a_Fr <- df_3a_Fr %>%  select(screen_name, Party, `Republican`, `Democrat`) %>% melt(id.vars = c('screen_name', 'Party')) %>%
+  rename(`Retweeted Party` = variable)
+
+df_3a_Fr$value <- ifelse(df_3a_Fr$`Retweeted Party` == 'Democrat', -1 * df_3a_Fr$value, df_3a_Fr$value)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(df_3a_Fr) + geom_bar(aes(x = reorder(screen_name, value), y = value, fill = `Retweeted Party`), stat = 'identity', width = .8) + coord_flip() + theme_tufte() + scale_y_continuous(breaks = c(-1,  0, 1), labels = c(1,  0, 1)) + theme(axis.ticks = element_blank(), axis.text.y = element_blank()) + labs(title = 'Proportion of Senator Retweets', subtitled = 'by party of retweeted Senator', x = '', y = '')
+```
+
+As we can see in the plot above, a substantial number of Senators retweet exclusively from their own party, and of those who do retweet from other parties only a minority do so for more than a trivial proportion of their retweets. This is indicative of the partisanship of the Senate even on twitter, with Senators largely remaining within their own ideological echo chambers in cyberspace.
+
+
+## b) Identifying Mentions
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+df_3b <- senator_tweets %>% filter(is_retweet == "FALSE") 
+df_3b$mentions_screen_name <- as.character(df_3b$mentions_screen_name)
+
+df_3b_ <- df_3b %>% filter(mentions_screen_name %in% sen_t$`Official Twitter`) %>%
+  left_join(sen_t, by = c("screen_name" ="Official Twitter")) %>%
+  rename(Party = `Party affiliation`)
+
+df_3b_ <- df_3b_ %>% left_join(sen_t, by = c("mentions_screen_name" ="Official Twitter")) %>%
+  rename(`Source Party` = `Party affiliation`)
+
+df_3b_ <- df_3b_ %>% group_by(screen_name, mentions_screen_name) %>% summarize(count = n())
+
+colnames(df_3b_)[c(1, 2, 3)] = c('Target', 'Source', 'Strength')
+
+df_3b_$Strength <- cut(df_3b_$Strength, breaks = c(0, 3, 10, 20), label = c("Weak","Fair","Strong"), ordered = TRUE)
+
+g <- as_tbl_graph(df_3b_, directed = FALSE) %>% 
+   mutate(Centrality = centrality_closeness(),
+          Party = sen_t$`Party affiliation`)
+
+ggraph(g) + geom_edge_link(aes(alpha = factor(Strength))) +
+  geom_node_point(aes(size = Centrality, color = Party), alpha = 0.5) +
+  guides(size = FALSE, alpha = FALSE) +  theme_graph()
+```
+
+The undirected network graph above shows the links between retweets among Senators. The nodes are colored according to the Senators' parties and  the thickness of the edge links are shaded according to the strength of the relationship as measured by number of retweets. Again we see that Senators have weak connections to members of the other party, which is consistent with our findings from part 3a above.
